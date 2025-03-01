@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Flappy Bird Clone</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #f0f0f0;
+      font-family: Arial, sans-serif;
+    }
+    
+    #game-container {
+      position: relative;
+      width: 320px;
+      height: 480px;
+      overflow: hidden;
+      border: 2px solid #333;
+      background-color: #70c5ce;
+    }
+    
+    #start-screen {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 10;
+    }
+    
+    #start-screen h1 {
+      color: white;
+      margin-bottom: 20px;
+    }
+    
+    #start-button, #restart-button {
+      padding: 10px 20px;
+      font-size: 18px;
+      background-color: #f1c40f;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    
+    #game-over {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      display: none;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      background-color: rgba(0, 0, 0, 0.5);
+      z-index: 10;
+    }
+    
+    #score {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      font-size: 24px;
+      font-weight: bold;
+      color: white;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <div id="score">0</div>
+    <svg id="game-svg" width="320" height="480"></svg>
+    
+    <div id="start-screen">
+      <h1>Flappy Bird</h1>
+      <button id="start-button">Start Game</button>
+    </div>
+    
+    <div id="game-over">
+      <h1>Game Over</h1>
+      <p id="final-score">Score: 0</p>
+      <button id="restart-button">Play Again</button>
+    </div>
+  </div>
+
+  <script>
+    // Game elements
+    const svg = document.getElementById('game-svg');
+    const scoreElement = document.getElementById('score');
+    const startScreen = document.getElementById('start-screen');
+    const startButton = document.getElementById('start-button');
+    const gameOverScreen = document.getElementById('game-over');
+    const finalScoreElement = document.getElementById('final-score');
+    const restartButton = document.getElementById('restart-button');
+    
+    // Game variables
+    let bird;
+    let pipes = [];
+    let gameLoopId;
+    let score = 0;
+    let isGameActive = false;
+    
+    // Game constants
+    const GRAVITY = 0.5;
+    const JUMP_FORCE = -10;
+    const BIRD_WIDTH = 34;
+    const BIRD_HEIGHT = 24;
+    const PIPE_WIDTH = 52;
+    const PIPE_GAP = 150;
+    const PIPE_SPEED = 2;
+    const PIPE_SPAWN_RATE = 120; // frames
+    let frameCount = 0;
+    
+    // Bird properties
+    let birdY = 240;
+    let birdVelocity = 0;
+    
+    // Create the bird
+    function createBird() {
+      // Remove old bird if exists
+      if (bird) bird.remove();
+      
+      // Reset bird position and velocity
+      birdY = 240;
+      birdVelocity = 0;
+      
+      // Create new bird
+      bird = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      
+      // Bird body (yellow circle)
+      const birdBody = document.createElementNS('http://www.w3.org/2000/svg', 'ellipse');
+      birdBody.setAttribute('cx', '50');
+      birdBody.setAttribute('cy', birdY);
+      birdBody.setAttribute('rx', BIRD_WIDTH / 2);
+      birdBody.setAttribute('ry', BIRD_HEIGHT / 2);
+      birdBody.setAttribute('fill', '#f1c40f');
+      birdBody.setAttribute('stroke', '#333');
+      birdBody.setAttribute('stroke-width', '2');
+      
+      // Bird eye
+      const birdEye = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      birdEye.setAttribute('cx', '60');
+      birdEye.setAttribute('cy', birdY - 5);
+      birdEye.setAttribute('r', '4');
+      birdEye.setAttribute('fill', 'white');
+      
+      // Bird pupil
+      const birdPupil = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      birdPupil.setAttribute('cx', '62');
+      birdPupil.setAttribute('cy', birdY - 5);
+      birdPupil.setAttribute('r', '2');
+      birdPupil.setAttribute('fill', 'black');
+      
+      // Bird beak
+      const birdBeak = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      birdBeak.setAttribute('points', `65,${birdY} 75,${birdY - 5} 75,${birdY + 5}`);
+      birdBeak.setAttribute('fill', '#e74c3c');
+      
+      // Add parts to bird
+      bird.appendChild(birdBody);
+      bird.appendChild(birdEye);
+      bird.appendChild(birdPupil);
+      bird.appendChild(birdBeak);
+      
+      svg.appendChild(bird);
+    }
+    
+    // Update bird position
+    function updateBird() {
+      birdVelocity += GRAVITY;
+      birdY += birdVelocity;
+      
+      // Update bird SVG position
+      const birdBody = bird.childNodes[0];
+      birdBody.setAttribute('cy', birdY);
+      
+      const birdEye = bird.childNodes[1];
+      birdEye.setAttribute('cy', birdY - 5);
+      
+      const birdPupil = bird.childNodes[2];
+      birdPupil.setAttribute('cy', birdY - 5);
+      
+      const birdBeak = bird.childNodes[3];
+      birdBeak.setAttribute('points', `65,${birdY} 75,${birdY - 5} 75,${birdY + 5}`);
+      
+      // Check if bird hit the boundaries
+      if (birdY <= 0 + BIRD_HEIGHT / 2 || birdY >= 480 - BIRD_HEIGHT / 2) {
+        gameOver();
+      }
+    }
+    
+    // Make the bird jump
+    function jump() {
+      if (isGameActive) {
+        birdVelocity = JUMP_FORCE;
+      }
+    }
+    
+    // Create a pair of pipes
+    function createPipes() {
+      const pipeGapY = Math.floor(Math.random() * (300 - 100)) + 100; // Random gap position
+      
+      // Create top pipe
+      const topPipe = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      topPipe.setAttribute('x', '320');
+      topPipe.setAttribute('y', '0');
+      topPipe.setAttribute('width', PIPE_WIDTH);
+      topPipe.setAttribute('height', pipeGapY - PIPE_GAP / 2);
+      topPipe.setAttribute('fill', '#2ecc71');
+      topPipe.setAttribute('stroke', '#27ae60');
+      topPipe.setAttribute('stroke-width', '2');
+      
+      // Create bottom pipe
+      const bottomPipe = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      bottomPipe.setAttribute('x', '320');
+      bottomPipe.setAttribute('y', pipeGapY + PIPE_GAP / 2);
+      bottomPipe.setAttribute('width', PIPE_WIDTH);
+      bottomPipe.setAttribute('height', 480 - (pipeGapY + PIPE_GAP / 2));
+      bottomPipe.setAttribute('fill', '#2ecc71');
+      bottomPipe.setAttribute('stroke', '#27ae60');
+      bottomPipe.setAttribute('stroke-width', '2');
+      
+      svg.appendChild(topPipe);
+      svg.appendChild(bottomPipe);
+      
+      pipes.push({
+        top: topPipe,
+        bottom: bottomPipe,
+        x: 320,
+        counted: false
+      });
+    }
+    
+    // Update pipes positions
+    function updatePipes() {
+      for (let i = pipes.length - 1; i >= 0; i--) {
+        const pipe = pipes[i];
+        pipe.x -= PIPE_SPEED;
+        
+        pipe.top.setAttribute('x', pipe.x);
+        pipe.bottom.setAttribute('x', pipe.x);
+        
+        // Check if bird passed the pipe to increase score
+        if (!pipe.counted && pipe.x + PIPE_WIDTH < 50) {
+          score++;
+          scoreElement.textContent = score;
+          pipe.counted = true;
+        }
+        
+        // Remove pipes that are off screen
+        if (pipe.x + PIPE_WIDTH < 0) {
+          pipe.top.remove();
+          pipe.bottom.remove();
+          pipes.splice(i, 1);
+        }
+        
+        // Check collision
+        if (isColliding(pipe)) {
+          gameOver();
+        }
+      }
+      
+      // Create new pipes
+      if (frameCount % PIPE_SPAWN_RATE === 0) {
+        createPipes();
+      }
+    }
+    
+    // Check collision between bird and pipes
+    function isColliding(pipe) {
+      const birdLeft = 50 - BIRD_WIDTH / 2;
+      const birdRight = 50 + BIRD_WIDTH / 2;
+      const birdTop = birdY - BIRD_HEIGHT / 2;
+      const birdBottom = birdY + BIRD_HEIGHT / 2;
+      
+      const pipeLeft = pipe.x;
+      const pipeRight = pipe.x + PIPE_WIDTH;
+      const topPipeBottom = parseInt(pipe.top.getAttribute('height'));
+      const bottomPipeTop = parseInt(pipe.bottom.getAttribute('y'));
+      
+      // Check horizontal collision
+      if (birdRight > pipeLeft && birdLeft < pipeRight) {
+        // Check vertical collision with top pipe
+        if (birdTop < topPipeBottom) {
+          return true;
+        }
+        
+        // Check vertical collision with bottom pipe
+        if (birdBottom > bottomPipeTop) {
+          return true;
+        }
+      }
+      
+      return false;
+    }
+    
+    // Game over
+    function gameOver() {
+      isGameActive = false;
+      cancelAnimationFrame(gameLoopId);
+      finalScoreElement.textContent = `Score: ${score}`;
+      gameOverScreen.style.display = 'flex';
+    }
+    
+    // Game loop
+    function gameLoop() {
+      frameCount++;
+      
+      updateBird();
+      updatePipes();
+      
+      if (isGameActive) {
+        gameLoopId = requestAnimationFrame(gameLoop);
+      }
+    }
+    
+    // Start the game
+    function startGame() {
+      // Reset game state
+      pipes.forEach(pipe => {
+        pipe.top.remove();
+        pipe.bottom.remove();
+      });
+      pipes = [];
+      score = 0;
+      frameCount = 0;
+      scoreElement.textContent = '0';
+      
+      // Create game elements
+      createBird();
+      
+      // Hide screens
+      startScreen.style.display = 'none';
+      gameOverScreen.style.display = 'none';
+      
+      // Start game loop
+      isGameActive = true;
+      gameLoop();
+    }
+    
+    // Event listeners
+    startButton.addEventListener('click', startGame);
+    restartButton.addEventListener('click', startGame);
+    document.addEventListener('keydown', (event) => {
+      if (event.code === 'Space') {
+        jump();
+        
+        // Prevent scrolling with spacebar
+        event.preventDefault();
+      }
+    });
+    
+    // Mobile touch support
+    document.addEventListener('touchstart', (event) => {
+      jump();
+      event.preventDefault();
+    }, { passive: false });
+  </script>
+</body>
+</html>

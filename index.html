@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Plane Game</title>
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            font-family: Arial, sans-serif;
+        }
+        #score {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+        }
+        #gameOver {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+            display: none;
+        }
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: white;
+            font-size: 18px;
+            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
+        }
+        #restartButton {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 24px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #restartButton:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <div id="controls">
+        Controls: Arrow keys (Move) | Space (Shoot)
+    </div>
+    <div id="gameOver">
+        Game Over!<br>
+        <button id="restartButton">Restart</button>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Game variables
+        let scene, camera, renderer, plane, buildings = [];
+        let score = 0;
+        let speed = 0.2;
+        let gameActive = true;
+        let lastBuildingTime = 0;
+        let buildingInterval = 1500; // milliseconds
+        let environmentObjects = [];
+        let environmentChunks = [];
+        let keyState = {};
+        let planeVelocity = { x: 0, y: 0 };
+        let bullets = [];
+        let enemies = [];
+        let lastShotTime = 0;
+        let shotCooldown = 300; // milliseconds
+        let enemySpawnTime = 0;
+        let enemySpawnInterval = 2000; // milliseconds
+        
+        // Initialize the game
+        function init() {
+            // Clean up previous game objects
+            buildings.forEach(b => scene.remove(b));
+            environmentObjects.forEach(o => scene.remove(o));
+            environmentChunks.forEach(chunk => {
+                chunk.objects.forEach(obj => scene.remove(obj));
+            });
+            bullets.forEach(b => scene.remove(b));
+            enemies.forEach(e => scene.remove(e));
+            
+            // Reset game state
+            buildings = [];
+            environmentObjects = [];
+            environmentChunks = [];
+            bullets = [];
+            enemies = [];
+            score = 0;
+            speed = 0.2;
+            gameActive = true;
+            lastBuildingTime = 0;
+            enemySpawnTime = 0;
+            planeVelocity = { x: 0, y: 0 };
+            keyState = {};
+            
+            document.getElementById('score').textContent = 'Score: 0';
+            document.getElementById('gameOver').style.display = 'none';
+            
+            // Create scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            
+            // Create camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 5;
+            camera.position.y = 2;
+            
+            // Create renderer
+            if (!renderer) {
+                renderer = new THREE.WebGLRenderer({ antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                document.body.appendChild(renderer.domElement);
+            }
+            
+            // Create plane (triangle shape)
+            const planeGeometry = new THREE.ConeGeometry(0.5, 1, 3);
+            const planeMaterial = new THREE.MeshPhongMaterial({ color: 0xFF0000 }); // Red
+            plane = new THREE.Mesh(planeGeometry, planeMaterial);
+            plane.rotation.x = Math.PI / 2; // Rotate to point forward
+            plane.position.y = 0;
+            plane.position.z = -4;
+            scene.add(plane);
+            
+            // Create textured ground
+            createGround();
+            
+            // Create initial environment chunks
+            for (let z = -60; z <= 60; z += 30) {
+                createEnvironmentChunk(z);
+            }
+            
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0x404040);
+            scene.add(ambientLight);
+            
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(0, 10, 5);
+            scene.add(directionalLight);
+            
+            // Event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('keydown', function(e) { 
+                keyState[e.key] = true; 
+                
+                // Shoot when spacebar is pressed
+                if (e.key === ' ' && gameActive) {
+                    shoot();
+                }
+            });
+            document.addEventListener('keyup', function(e) { keyState[e.key] = false; });
+            document.getElementById('restartButton').addEventListener('click', init);
+            
+            // Start game loop
+            animate();
+        }
+        
+        // Create ground with simple texture
+        function createGround() {
+            // Create a canvas for ground texture
+            const groundCanvas = document.createElement('canvas');
+            const ctx = groundCanvas.getContext('2d');
+            groundCanvas.width = 512;
+            groundCanvas.height = 512;
+            
+            // Create a grid pattern
+            ctx.fillStyle = '#228B22'; // Forest green
+            ctx.fillRect(0, 0, 512, 512);
+            
+            // Add grid lines
+            ctx.strokeStyle = '#1a6b1a';
+            ctx.lineWidth = 2;
+            
+            // Horizontal lines
+            for (let i = 0; i < 512; i += 64) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(512, i);
+                ctx.stroke();
+            }
+            
+            // Vertical lines
+            for (let i = 0; i < 512; i += 64) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, 512);
+                ctx.stroke();
+            }
+            
+            // Create texture from canvas
+            const groundTexture = new THREE.CanvasTexture(groundCanvas);
+            groundTexture.wrapS = THREE.RepeatWrapping;
+            groundTexture.wrapT = THREE.RepeatWrapping;
+            groundTexture.repeat.set(30, 30);
+            
+            // Create ground
+            const groundGeometry = new THREE.PlaneGeometry(300, 300);
+            const groundMaterial = new THREE.MeshPhongMaterial({ 
+                map: groundTexture, 
+                side: THREE.DoubleSide 
+            });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // Rotate to be horizontal
+            ground.position.y = -2;
+            scene.add(ground);
+        }
+        
+        // Create an environment chunk at specific Z position
+        function createEnvironmentChunk(zPosition) {
+            const objects = [];
+            const chunkWidth = 60;
+            const chunkDepth = 30;
+            
+            // Add trees and rocks within this chunk
+            for (let i = 0; i < 15; i++) {
+                // Position objects at the sides to avoid flight path
+                const xPos = (Math.random() > 0.5 ? 1 : -1) * (5 + Math.random() * 20);
+                const zPos = zPosition - Math.random() * chunkDepth;
+                
+                if (Math.random() > 0.5) {
+                    objects.push(...createTree(xPos, zPos));
+                } else {
+                    objects.push(createRock(xPos, zPos));
+                }
+            }
+            
+            environmentChunks.push({
+                zPosition: zPosition,
+                objects: objects
+            });
+        }
+        
+        // Create a simple tree
+        function createTree(x, z) {
+            const trunkGeometry = new THREE.CylinderGeometry(0.2, 0.2, 1, 8);
+            const trunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 }); // Brown
+            const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
+            trunk.position.set(x, -1.5, z);
+            
+            const leavesGeometry = new THREE.ConeGeometry(1, 2, 8);
+            const leavesMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 }); // Green
+            const leaves = new THREE.Mesh(leavesGeometry, leavesMaterial);
+            leaves.position.set(x, 0, z);
+            
+            scene.add(trunk);
+            scene.add(leaves);
+            
+            return [trunk, leaves];
+        }
+        
+        // Create a simple rock
+        function createRock(x, z) {
+            const rockGeometry = new THREE.SphereGeometry(0.5, 8, 6);
+            rockGeometry.scale(1, 0.5, 1);
+            const rockMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 }); // Gray
+            const rock = new THREE.Mesh(rockGeometry, rockMaterial);
+            rock.position.set(x, -1.75, z);
+            scene.add(rock);
+            return rock;
+        }
+        
+        // Handle window resizing
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+        
+        // Create a building with texture
+        function createBuilding() {
+            const width = 1 + Math.random() * 1.5;
+            const height = 2 + Math.random() * 3;
+            
+            // Create building texture
+            const buildingCanvas = document.createElement('canvas');
+            const ctx = buildingCanvas.getContext('2d');
+            buildingCanvas.width = 128;
+            buildingCanvas.height = 128;
+            
+            // Background color
+            ctx.fillStyle = '#555555';
+            ctx.fillRect(0, 0, 128, 128);
+            
+            // Windows
+            ctx.fillStyle = '#88CCFF';
+            for (let y = 16; y < 128; y += 32) {
+                for (let x = 16; x < 128; x += 32) {
+                    // Randomize some windows to be dark
+                    if (Math.random() > 0.3) {
+                        ctx.fillRect(x, y, 12, 20);
+                    } else {
+                        ctx.fillStyle = '#333333';
+                        ctx.fillRect(x, y, 12, 20);
+                        ctx.fillStyle = '#88CCFF';
+                    }
+                }
+            }
+            
+            const buildingTexture = new THREE.CanvasTexture(buildingCanvas);
+            
+            const buildingGeometry = new THREE.BoxGeometry(width, height, width);
+            const buildingMaterial = new THREE.MeshPhongMaterial({ map: buildingTexture });
+            const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+            
+            // Position the building (coming from the front now)
+            building.position.x = Math.random() * 8 - 4; // Random x position between -4 and 4
+            building.position.y = -2 + height / 2; // Bottom at ground level
+            building.position.z = -30; // Start from front (negative z) and move toward player
+            
+            scene.add(building);
+            buildings.push(building);
+        }
+        
+        // Create a red enemy cube
+        function createEnemy() {
+            const size = 0.8 + Math.random() * 0.4;
+            const enemyGeometry = new THREE.BoxGeometry(size, size, size);
+            const enemyMaterial = new THREE.MeshPhongMaterial({ color: 0xFF0000 }); // Red
+            const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+            
+            // Position the enemy
+            enemy.position.x = Math.random() * 8 - 4; // Random x position between -4 and 4
+            enemy.position.y = Math.random() * 4 - 1; // Random y position
+            enemy.position.z = -30; // Start from front (negative z)
+            
+            scene.add(enemy);
+            enemies.push(enemy);
+        }
+        
+        // Create a bullet
+        function shoot() {
+            const currentTime = Date.now();
+            if (currentTime - lastShotTime < shotCooldown) return;
+            
+            lastShotTime = currentTime;
+            
+            const bulletGeometry = new THREE.SphereGeometry(0.2, 8, 8);
+            const bulletMaterial = new THREE.MeshPhongMaterial({ color: 0xFFFF00 }); // Yellow
+            const bullet = new THREE.Mesh(bulletGeometry, bulletMaterial);
+            
+            // Position the bullet at the front of the plane
+            bullet.position.x = plane.position.x;
+            bullet.position.y = plane.position.y;
+            bullet.position.z = plane.position.z - 1;
+            
+            scene.add(bullet);
+            bullets.push(bullet);
+        }
+        
+        // Check for collision between two objects
+        function checkCollision(obj1, obj2) {
+            const box1 = new THREE.Box3().setFromObject(obj1);
+            const box2 = new THREE.Box3().setFromObject(obj2);
+            
+            return box1.intersectsBox(box2);
+        }
+        
+        // Game over function
+        function gameOver() {
+            gameActive = false;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+        
+        // Update plane position based on controls
+        function updatePlanePosition() {
+            // Apply acceleration based on key presses
+            const acceleration = 0.01;
+            const maxSpeed = 0.2;
+            const drag = 0.05;
+            
+            // Horizontal movement (left/right)
+            if (keyState['ArrowLeft']) {
+                planeVelocity.x -= acceleration;
+                plane.rotation.z = Math.PI / 6; // Tilt when moving left
+            } else if (keyState['ArrowRight']) {
+                planeVelocity.x += acceleration;
+                plane.rotation.z = -Math.PI / 6; // Tilt when moving right
+            } else {
+                // Return towards level rotation when not turning
+                plane.rotation.z = THREE.MathUtils.lerp(plane.rotation.z, 0, 0.1);
+            }
+            
+            // Vertical movement (up/down)
+            if (keyState['ArrowUp']) {
+                planeVelocity.y += acceleration;
+                plane.rotation.z = Math.min(plane.rotation.z, 0); // Limit combined rotation
+            } else if (keyState['ArrowDown']) {
+                planeVelocity.y -= acceleration;
+                plane.rotation.z = Math.max(plane.rotation.z, 0); // Limit combined rotation
+            }
+            
+            // Apply drag to slow down when no keys are pressed
+            planeVelocity.x *= (1 - drag);
+            planeVelocity.y *= (1 - drag);
+            
+            // Clamp velocity to max speed
+            planeVelocity.x = Math.max(Math.min(planeVelocity.x, maxSpeed), -maxSpeed);
+            planeVelocity.y = Math.max(Math.min(planeVelocity.y, maxSpeed), -maxSpeed);
+            
+            // Update position
+            plane.position.x += planeVelocity.x;
+            plane.position.y += planeVelocity.y;
+            
+            // Enforce boundaries
+            plane.position.x = Math.max(Math.min(plane.position.x, 4), -4);
+            plane.position.y = Math.max(Math.min(plane.position.y, 3), -1);
+        }
+        
+        // Update bullets
+        function updateBullets() {
+            const bulletSpeed = 0.6;
+            
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                // Move bullet forward
+                bullets[i].position.z -= bulletSpeed;
+                
+                // Check for collisions with enemies
+                for (let j = enemies.length - 1; j >= 0; j--) {
+                    if (checkCollision(bullets[i], enemies[j])) {
+                        // Remove the bullet
+                        scene.remove(bullets[i]);
+                        bullets.splice(i, 1);
+                        
+                        // Remove the enemy
+                        scene.remove(enemies[j]);
+                        enemies.splice(j, 1);
+                        
+                        // Increase score
+                        score += 5;
+                        document.getElementById('score').textContent = 'Score: ' + score;
+                        
+                        // Exit the inner loop since this bullet is gone
+                        break;
+                    }
+                }
+                
+                // Remove bullets that are far away
+                if (i < bullets.length && bullets[i].position.z < -50) {
+                    scene.remove(bullets[i]);
+                    bullets.splice(i, 1);
+                }
+            }
+        }
+        
+        // Update enemies
+        function updateEnemies() {
+            // Move enemies
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                enemies[i].position.z += speed;
+                enemies[i].rotation.x += 0.01;
+                enemies[i].rotation.y += 0.01;
+                
+                // Check for collision with player
+                if (checkCollision(plane, enemies[i])) {
+                    gameOver();
+                }
+                
+                // Remove enemies that are past the camera
+                if (enemies[i].position.z > 10) {
+                    scene.remove(enemies[i]);
+                    enemies.splice(i, 1);
+                }
+            }
+            
+            // Spawn new enemies
+            const currentTime = Date.now();
+            if (currentTime - enemySpawnTime > enemySpawnInterval) {
+                createEnemy();
+                enemySpawnTime = currentTime;
+                
+                // Decrease interval as game progresses (more enemies)
+                if (enemySpawnInterval > 700) {
+                    enemySpawnInterval -= 5;
+                }
+            }
+        }
+        
+        // Update environment chunks
+        function updateEnvironment() {
+            // Move all chunks forward
+            for (let i = environmentChunks.length - 1; i >= 0; i--) {
+                const chunk = environmentChunks[i];
+                chunk.zPosition += speed;
+                
+                // Move all objects in this chunk
+                chunk.objects.forEach(obj => {
+                    obj.position.z += speed;
+                });
+                
+                // Remove chunks that are too far behind
+                if (chunk.zPosition > 60) {
+                    // Remove all objects in this chunk
+                    chunk.objects.forEach(obj => scene.remove(obj));
+                    environmentChunks.splice(i, 1);
+                    
+                    // Create a new chunk ahead
+                    createEnvironmentChunk(-60);
+                }
+            }
+        }
+        
+        // Main game loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            if (gameActive) {
+                // Update plane position based on controls
+                updatePlanePosition();
+                
+                // Update bullets
+                updateBullets();
+                
+                // Update enemies
+                updateEnemies();
+                
+                // Update procedural environment
+                updateEnvironment();
+                
+                // Move buildings (now coming from front to back)
+                for (let i = buildings.length - 1; i >= 0; i--) {
+                    buildings[i].position.z += speed; // Moving in positive Z direction
+                    
+                    // Check for collision
+                    if (checkCollision(plane, buildings[i])) {
+                        gameOver();
+                    }
+                    
+                    // Remove buildings that are past the camera
+                    if (buildings[i].position.z > 10) {
+                        scene.remove(buildings[i]);
+                        buildings.splice(i, 1);
+                        
+                        // Increase score
+                        score++;
+                        document.getElementById('score').textContent = 'Score: ' + score;
+                        
+                        // Increase speed every 10 points
+                        if (score % 10 === 0) {
+                            speed += 0.05;
+                        }
+                    }
+                }
+                
+                // Create new buildings
+                const currentTime = Date.now();
+                if (currentTime - lastBuildingTime > buildingInterval) {
+                    createBuilding();
+                    lastBuildingTime = currentTime;
+                    
+                    // Decrease interval as game progresses (more buildings)
+                    if (buildingInterval > 800) {
+                        buildingInterval -= 10;
+                    }
+                }
+            }
+            
+            renderer.render(scene, camera);
+        }
+        
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
